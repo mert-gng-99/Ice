@@ -1,0 +1,46 @@
+name: Build Ice (macOS 27 fix, ad-hoc)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [macos27-build]
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pick newest Xcode
+        run: |
+          ls -d /Applications/Xcode*.app
+          XC=$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)
+          echo "Using $XC"
+          sudo xcode-select -s "$XC"
+          xcodebuild -version
+          xcodebuild -showsdks | grep -i macos
+
+      - name: Build (Release, ad-hoc signed)
+        run: |
+          set -o pipefail
+          xcodebuild -project Ice.xcodeproj -scheme Ice -configuration Release \
+            -destination 'platform=macOS' -derivedDataPath build build \
+            ENABLE_HARDENED_RUNTIME=NO \
+            CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual CODE_SIGNING_REQUIRED=YES \
+            CODE_SIGNING_ALLOWED=YES DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER= \
+            | tail -40
+
+      - name: Verify and zip
+        run: |
+          APP=build/Build/Products/Release/Ice.app
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          /usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$APP/Contents/Info.plist"
+          ditto -c -k --keepParent "$APP" Ice-macos27.zip
+          shasum -a 256 Ice-macos27.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Ice-macos27
+          path: Ice-macos27.zip
+          retention-days: 14
